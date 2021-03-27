@@ -1,0 +1,16 @@
+version: 2
+
+sources:
+  - name: AUDIT
+    description: Audit database track any events or control status executed in dbt.
+    database: DBT_POC_HCL_DB
+    schema: DBT_POC_HCL_SCHEMA
+    tables:
+      - name: M_ETL_AUDIT_CHECK
+        description: An audit table that tracks all model start time, end time, insert quantity, update quantity, delete quantity, audit check description.
+        columns:
+          - name: AUDIT_SK
+            description:  A Unique column to refer each rows in M_ETL_AUDIT_CHECK.
+            tests:
+              - unique
+              - not_null

@@ -1,0 +1,24 @@
+version: 2
+
+sources:
+  - name: STG
+    description: Staging table that contain raw data.
+    database: DBT_POC_ETL_DB
+    schema: DBT_POC_ETL_SCHEMA
+    tables:
+      - name: CUSTOMER
+        description: Staging table that contain customer information
+        columns:
+          - name: C_CUSTKEY
+            description:  A Unique column to refer each rows in customer staging table.
+            tests:
+              - unique
+              - not_null
+      - name: CUSTOMER_INT
+        description: Intermediate table for customer staging table.
+        columns:
+          - name: C_CUSTKEY
+            description:  A Unique column to refer each rows in customer staging table.
+            tests:
+              - unique
+              - not_null

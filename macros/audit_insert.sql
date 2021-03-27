@@ -1,0 +1,19 @@
+{% macro audit_insert (ETL_RUN_DT, MODEL_STATUS,
+  MODEL_EXEC_START_TIME, MODEL_EXEC_END_TIME,INS_REC_CNTS,UPD_REC_CNTS,DEL_REC_CNTS,
+  AUDIT_CHK_DESC,AUDIT_CHK_FL) %}
+
+  {% set modelexestrttime = run_started_at.astimezone(modules.pytz.timezone("America/Chicago")) -%}
+
+  INSERT INTO {{ source('AUDIT','M_ETL_AUDIT_CHECK') }}
+  SELECT AUDIT_SK+1 AS AUDIT_SK,CAST('{{ ETL_RUN_DT }}' AS DATE) AS ETL_RUN_DT,
+  ETL_NR+1 AS ETL_NR,
+  '{{ this.table }}' AS MODEL_NAME, '{{ MODEL_STATUS }}' AS MODEL_STATUS,
+  CAST('{{ modelexestrttime }}' AS TIMESTAMP) AS MODEL_EXEC_START_TIME,
+  to_timestamp_ntz({{ MODEL_EXEC_END_TIME }})   AS MODEL_EXEC_END_TIME,
+  {{ INS_REC_CNTS }} AS INS_REC_CNTS, {{ UPD_REC_CNTS }} AS UPD_REC_CNTS,
+  {{ DEL_REC_CNTS }} AS DEL_REC_CNTS, '{{ AUDIT_CHK_DESC }}' AS AUDIT_CHK_DESC,
+  '{{ AUDIT_CHK_FL }}' AS AUDIT_CHK_FL
+  FROM (SELECT COALESCE(MAX(AUDIT_SK),0) AS AUDIT_SK,COALESCE(MAX(ETL_NR),0) AS
+  ETL_NR FROM {{ source('AUDIT','M_ETL_AUDIT_CHECK')}} )
+
+{% endmacro %}
