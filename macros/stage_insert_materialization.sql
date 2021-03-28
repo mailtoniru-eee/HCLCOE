@@ -1,5 +1,7 @@
 {% materialization stage_insert, default %}
 
+/*-----Get all parameter values from Config file ------*/
+
 {% set stagingtable = config.get('staging') %}
 {% set intermediatetable = config.get('intermediate') %}
 {% set keyfields = config.get('keycolumns') %}
@@ -12,6 +14,8 @@
        schema = stgschema,
        identifier = stagingtable)
   %}
+
+/*-----Check if staging table exists----------------*/
 
 {% if  stagingexist is none %}
 
@@ -26,6 +30,8 @@
        schema = stgschema,
       identifier = intermediatetable)
   %}
+
+/*-------Check if intermediate table exists---------*/
 
 {% if  intermediateexist is none %}
 
@@ -47,6 +53,8 @@
        identifier = stagingtable) -%}
 %}
 
+/*---------Check if there is mismatch between staging table and intermediate table without Hash Key-----*/
+
 {% set col = adapter.get_missing_columns(intermediatetablerelattion, stagingtablerelattion) %}
 
 {% if (col|length)  > 1 %}
@@ -67,11 +75,15 @@
 
 {% endcall %}
 
+/*-------Purge if any data exists in intermediate table------------*/
+
 {% call statement() %}
 
   {{ purge_data (stgdatabase, stgschema, intermediatetable) }}
 
 {% endcall %}
+
+/*---------Execute the actual insert statement. STG -> INT Table--------*/
 
 {% call statement('main') -%}
 
@@ -80,6 +92,8 @@
   {{ sql }}
 
 {% endcall %}
+
+/*------Check hash value between intermediate table and Temp table-----*/
 
 {% set hash_check %}
 
@@ -110,6 +124,8 @@
   {{ exceptions.raise_compiler_error("Hash value is not matching while loading. Try rerunning the load again") }}
 
 {% endif %}
+
+/*------Check if duplicate values exsists for passed key values------*/
 
 {% set duplicate_check %}
 
