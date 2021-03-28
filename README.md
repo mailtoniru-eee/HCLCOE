@@ -15,4 +15,4 @@ Try running the following commands:
 - Check out [the blog](https://blog.getdbt.com/) for the latest news on dbt's development and best practices
 
 ### Command to execute specific model
-$ dbt run --var "odate: '2021-03-25'" -m CUSTOMER_INT
+$ dbt run --var "odate: '2021-03-25'" -m <Model Name>
