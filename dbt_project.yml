@@ -30,6 +30,7 @@ vars:
   target_schema: DBT_POC_HCL_SCHEMA
   stg_schema: DBT_POC_ETL_DB
   db_name: DBT_POC_HCL_DB
+  time_zone: "America/Chicago"
 ##
 ##on-run-start:
   ##- "create table if not exists dbt_stg.load_audit( model_name string, model_state string, model_exe_time timestamp_ltz)"
@@ -41,3 +42,5 @@ models:
   dbt_elt_testing:
       # Applies to all files under models/example/
       staging:
+        pre-hook: "BEGIN TRANSACTION"
+        post-hook: "COMMIT"

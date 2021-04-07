@@ -7,7 +7,8 @@
 {% set keyfields = config.get('keycolumns') %}
 {% set stgdatabase = config.get('stgdb') %}
 {% set stgschema = config.get('stgschema') %}
-{% set modelexestrttime = run_started_at.astimezone(modules.pytz.timezone("America/Chicago")) -%}
+{% set dupchkfl = config.get('dupchkfl') %}
+{% set modelexestrttime = run_started_at.astimezone(modules.pytz.timezone(var("time_zone"))) -%}
 {% set odate = config.get('odate') %}
 {% set stagingexist = adapter.get_relation(
        database = stgdatabase,
@@ -15,11 +16,29 @@
        identifier = stagingtable)
   %}
 
+{% if dupchkfl == 'Y' %}
+
+  {% if keyfields is none %}
+
+    {{ exceptions.raise_compiler_error("Duplicate Check is enabled. But keycolumns are not defined in config.") }}
+
+  {% endif %}
+
+{% endif %}
+
 /*-----Check if staging table exists----------------*/
 
 {% if  stagingexist is none %}
 
-  {{ audit_insert(odate,'ABORTED',modelexestrttime, current_timestamp(), 0, 0, 0, 'STAGING TABLE DOESNOT EXIST', 'F' ) }}
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
+
+  {%- call statement() -%}
+
+    {{ audit_insert(invocation_id,odate,'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'STAGING TABLE DOESNOT EXIST', 'F' ) }}
+
+  {% endcall %}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
 
   {{ exceptions.raise_compiler_error("Staging Table " ~stagingtable~" doesnot exist") }}
 
@@ -35,9 +54,17 @@
 
 {% if  intermediateexist is none %}
 
-    {{ audit_insert(odate,'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'INTERMEDIATE TABLE DOESNOT EXIST', 'F' ) }}
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
 
-    {{ exceptions.raise_compiler_error("Intermediate Table " ~intermediatetable~" doesnot exist") }}
+  {%- call statement() -%}
+
+    {{ audit_insert(invocation_id, odate,'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'INTERMEDIATE TABLE DOESNOT EXIST', 'F' ) }}
+
+  {% endcall %}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
+
+  {{ exceptions.raise_compiler_error("Intermediate Table " ~intermediatetable~" doesnot exist") }}
 
 {% endif %}
 
@@ -57,11 +84,51 @@
 
 {% set col = adapter.get_missing_columns(intermediatetablerelattion, stagingtablerelattion) %}
 
-{% if (col|length)  > 1 %}
+{% if (col|length)  > 2 %}
 
-  {{ audit_insert(odate, 'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'SCHEMA MISMATCH BETWEEN STG TABLE AND INT TABLE HAPPENED', 'F' ) }}
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
+
+  {% call statement() %}
+
+    {{ audit_insert(invocation_id, odate, 'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'SCHEMA MISMATCH BETWEEN STG TABLE AND INT TABLE HAPPENED', 'F' ) }}
+
+  {% endcall %}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
 
   {{ exceptions.raise_compiler_error("Column mismatch between Staging and Intermediate table. " ~col | map(attribute="name") | join(', ')~" doesnot exist in intermediate table") }}
+
+{% endif %}
+
+{% if 'HASH_KEY' not in col | map(attribute="name") %}
+
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
+
+  {% call statement() %}
+
+    {{ audit_insert(invocation_id, odate, 'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'COLUMN HASH_KEY NOT EXISTS IN INTERMEDIATE TABLE', 'F' ) }}
+
+  {% endcall %}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
+
+  {{ exceptions.raise_compiler_error("Column HASH_KEY not exists in "~intermediatetable~". Please add the column and resubmit the model") }}
+
+{% endif %}
+
+{% if 'ETL_RECORDED_TS' not in col | map(attribute="name") %}
+
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
+
+  {% call statement() %}
+
+    {{ audit_insert(invocation_id, odate, 'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'COLUMN ETL_RECORDED_TS NOT EXISTS IN INTERMEDIATE TABLE', 'F' ) }}
+
+  {% endcall %}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
+
+  {{ exceptions.raise_compiler_error("Column ETL_RECORDED_TS not exists in "~intermediatetable~". Please add the column and resubmit the model") }}
 
 {% endif %}
 
@@ -85,13 +152,15 @@
 
 /*---------Execute the actual insert statement. STG -> INT Table--------*/
 
-{% call statement('main') -%}
+{% call statement('main',fetch_result=true) -%}
 
   INSERT INTO {{stgdatabase}}.{{stgschema}}.{{intermediatetable}}
   ( {{ columns }} )
   {{ sql }}
 
 {% endcall %}
+
+/*---{{ adapter.commit() }}----*/
 
 /*------Check hash value between intermediate table and Temp table-----*/
 
@@ -115,11 +184,15 @@
 
 {% if hash_check_result[0] != 0 %}
 
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
+
   {%- call statement() -%}
 
-    {{ audit_insert(odate, 'ABORTED',modelexestrttime, current_timestamp(), 0, 0, 0, 'HASH VALUE CHECK FAILED', 'F' ) }}
+    {{ audit_insert(invocation_id, odate, 'ABORTED', modelexestrttime, current_timestamp(), 0, 0, 0, 'HASH VALUE CHECK FAILED', 'F' ) }}
 
   {%- endcall -%}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
 
   {{ exceptions.raise_compiler_error("Hash value is not matching while loading. Try rerunning the load again") }}
 
@@ -127,34 +200,60 @@
 
 /*------Check if duplicate values exsists for passed key values------*/
 
-{% set duplicate_check %}
+{% if dupchkfl == 'Y' %}
 
-  {{ check_duplicates (stgdatabase, stgschema, keyfields) }}
+  {% set duplicate_check %}
 
-{% endset %}
+    {{ check_duplicates (stgdatabase, stgschema, keyfields) }}
 
-{% set dupsresults = run_query(duplicate_check) %}
+  {% endset %}
 
-{% if execute %}
+  {% set dupsresults = run_query(duplicate_check) %}
 
-  {% set dups_check_result = dupsresults.columns[0].values() %}
+  {% if execute %}
 
-{% else %}
+    {% set dups_check_result = dupsresults.columns[0].values() %}
 
-  {% set dups_check_result = [] %}
+  {% else %}
+
+    {% set dups_check_result = [] %}
+
+  {% endif %}
+
+  {% if dups_check_result|length %}
+
+    {{ run_hooks(pre_hooks, inside_transaction=True) }}
+
+    {%- call statement() -%}
+
+      {{ audit_insert(invocation_id, odate, 'ABORTED',modelexestrttime, current_timestamp(), 0, 0, 0, 'DUPLICATE VALUE EXISTS IN SOURCE', 'F' ) }}
+
+    {%- endcall -%}
+
+    {{ run_hooks(post_hooks, inside_transaction=True) }}
+
+    {{ exceptions.raise_compiler_error("Duplicate values exists in source for the key columns "~keyfields~". Please check with source") }}
+
+  {% endif %}
 
 {% endif %}
 
-{% if dups_check_result|length %}
+/*--------Get Counts-------------------------------------------------*/
 
-  {%- call statement() -%}
+{% set insertcounts = load_result('main')['data'] %}
 
-    {{ audit_insert(odate, 'ABORTED',modelexestrttime, current_timestamp(), 0, 0, 0, 'DUPLICATE VALUE EXISTS IN SOURCE', 'F' ) }}
+{% set insert_counts = insertcounts[0][0] %}
 
-  {%- endcall -%}
+{%- call statement() -%}
 
-  {{ exceptions.raise_compiler_error("Duplicate values exists in source for the key columns "~keyfields~". Please check with source") }}
+  {{ audit_insert(invocation_id, odate, 'SUCCESS', modelexestrttime, current_timestamp(), insert_counts, 0, 0, 'ALL CONTROLS PASSED', 'P' ) }}
 
-{% endif %}
+{%- endcall -%}
+
+{% do adapter.commit() %}
+
+{{ log("All the defined controls passed. Data got loaded successfully from "~stagingtable~" to "~intermediatetable~".", info=True ) }}
+
+{{ return({'relations': [intermediatetablerelattion]}) }}
 
 {% endmaterialization %}
