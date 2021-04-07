@@ -9,6 +9,6 @@ C_PHONE,
 C_ACCTBAL,
 C_MKTSEGMENT,
 C_COMMENT,
-{{ hash_dynamic('DBT_POC_ETL_DB','DBT_POC_ETL_SCHEMA','CUSTOMER') }},
-to_timestamp_ntz(current_timestamp) AS ETL_RECORDED_TS
+CAST({{ tz_timestamp(current_timestamp()) }} AS TIMESTAMP) AS ETL_RECORDED_TS,
+{{ hash_dynamic('DBT_POC_ETL_DB','DBT_POC_ETL_SCHEMA','CUSTOMER') }}
 FROM {{ source('STG','CUSTOMER') }}
